@@ -1,0 +1,619 @@
+/*
+  Blood Bank & Cold Room Monitor — AP Mode (Final)
+  ------------------------------------------------
+  ESP32 pins:
+    NTC divider mid-point  -> GPIO33 (ADC)
+    Buzzer (via BC547 base)-> GPIO27 (1k base resistor; buzzer + to +5V)
+    Relay (optional)       -> GPIO19
+    LCD I2C                -> SDA=21, SCL=22 (addr 0x27)
+    SIM900A TX (3VT)       -> ESP32 RX2 GPIO16
+    SIM900A RX (3VR)       -> ESP32 TX2 GPIO17
+  Wi-Fi AP: SSID "BloodBankTemp", PASS "12345678"  -> http://192.168.4.1
+*/
+
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Preferences.h>
+#include <FS.h>
+#include <LittleFS.h>
+#include <math.h>
+
+// ---------- Wi-Fi AP ----------
+const char* AP_SSID = "BloodBankTemp";
+const char* AP_PASS = "12345678";
+
+// ---------- LCD 20x4 ----------
+#define LCD_ADDR 0x27
+LiquidCrystal_I2C lcd(LCD_ADDR, 20, 4);
+
+// ---------- NTC (10k, Beta 3950) on GPIO33 ----------
+#define THERM_ADC_PIN 33
+const float THERM_R_FIXED = 10000.0;
+const float THERM_R0      = 10000.0;
+const float THERM_T0_K    = 25.0 + 273.15;
+const float THERM_BETA    = 3950.0;
+const float VREF          = 3.3;
+const int   ADC_MAX       = 4095;
+
+// ---------- I/O ----------
+#define BUZZER_PIN 27
+#define RELAY_PIN  19
+const int LEDC_CH=0, LEDC_RES=10, LEDC_DUTY=512;
+
+// ---------- SIM900A (UART2) ----------
+#define GSM_RX_PIN 16   // ESP32 RX2  <- SIM900 TX (3VT)
+#define GSM_TX_PIN 17   // ESP32 TX2  -> SIM900 RX (3VR)
+#define GSM_BAUD   9600
+HardwareSerial GSM(2);
+
+// ---------- Timing & logic ----------
+const uint32_t SAMPLE_MS=1000;
+const int      PER_READ_SAMPLES=16;
+const uint8_t  PREALARM_SEC=5, ALARM_SEC=10, CLEAR_SEC=15;
+
+uint32_t LOG_WRITE_MS  = 60UL*1000UL;        // write every 60s
+const size_t LOG_MAX_BYTES = 1*1024*1024;
+
+// ---------- State / config ----------
+WebServer server(80);
+Preferences prefs;
+
+struct Config {
+  float  offsetC = 0.0;
+  float  lowC    = 2.0;
+  float  highC   = 6.0;
+  String phones  = "";
+  bool   soundEnable = true;   // device buzzer
+  bool   callEnable  = false;  // optional call attempt (ATD)
+  uint16_t smsIntervalMin = 5; // user-set interval (minutes)
+} cfg;
+
+float tempFilt=NAN, minC=NAN, maxC=NAN;
+uint32_t lastSample=0, lastLogWrite=0, lastSmsMs=0, lastCallMs=0;
+
+const int AVG_N=8; float avgBuf[AVG_N]; int avgIdx=0, avgFill=0;
+File logFile; bool fsOk=false;
+
+// Alarm state
+enum AlarmState { NORMAL=0, PREALARM=1, ALARM=2 };
+AlarmState alarmState=NORMAL;
+uint16_t outCnt=0, inCnt=0;
+
+String lastSmsInfo="none", lastCallInfo="off";
+
+// ---------- GSM time (for timestamped logs) ----------
+String lastTimeStr="";                   // "yyyy-MM-dd HH:MM:SS"
+uint32_t lastGsmTimePoll=0;
+const uint32_t GSM_TIME_POLL_MS = 60UL*1000UL;  // try once a minute
+
+// ---------- Utils ----------
+template<typename T> T clampT(T v,T lo,T hi){return v<lo?lo:(v>hi?hi:v);}
+
+// ---------- NTC ----------
+float adcRawToCelsius(int raw){
+  raw = constrain(raw,1,ADC_MAX-1);
+  float v = (raw*VREF)/ADC_MAX; v = clampT(v,0.001f,VREF-0.001f);
+  float r = (v*THERM_R_FIXED)/(VREF-v); r = max(r,100.0f);
+  float invT = (1.0/THERM_T0_K) + (1.0/THERM_BETA)*log(r/THERM_R0);
+  return (1.0/invT) - 273.15;
+}
+float readNTC_Celsius_multi(int n){
+  const int N=min(n,15); int buf[15];
+  for(int i=0;i<N;i++){ buf[i]=analogRead(THERM_ADC_PIN); delayMicroseconds(250); }
+  // median + trimmed mean
+  for(int i=0;i<N;i++) for(int j=i+1;j<N;j++) if(buf[j]<buf[i]){int t=buf[i];buf[i]=buf[j];buf[j]=t;}
+  int m=buf[N/2]; long sum=0; int cnt=0;
+  for(int i=0;i<N;i++){ if(abs(buf[i]-m)<=100){ sum+=buf[i]; cnt++; } }
+  int rawAvg = cnt? (int)(sum/cnt) : m;
+  return adcRawToCelsius(rawAvg);
+}
+float filtTempMA(float x){
+  avgBuf[avgIdx]=x; avgIdx=(avgIdx+1)%AVG_N; if(avgFill<AVG_N) avgFill++;
+  float s=0; for(int i=0;i<avgFill;i++) s+=avgBuf[i]; return s/avgFill;
+}
+
+// ---------- LCD ----------
+void lcdSplash(){
+  lcd.clear();
+  lcd.setCursor(0,0); lcd.print("Blood Bank Monitor");
+  lcd.setCursor(0,1); lcd.print("AP: BloodBankTemp");
+  lcd.setCursor(0,2); lcd.print("Pass: 12345678");
+  lcd.setCursor(0,3); lcd.print("Open: 192.168.4.1");
+}
+void lcdScreen(){
+  lcd.setCursor(0,0);
+  const char* sState=(alarmState==ALARM)?"ALARM":(alarmState==PREALARM)?"PRE":" OK ";
+  char l0[21]; snprintf(l0,sizeof(l0),"Temp %6.2f C  %s",tempFilt,sState);
+  lcd.print(l0); for(int i=strlen(l0); i<20; i++) lcd.print(' ');
+
+  lcd.setCursor(0,1);
+  char l1[21]; snprintf(l1,sizeof(l1),"Range %4.1f-%4.1f C",cfg.lowC,cfg.highC);
+  lcd.print(l1); for(int i=strlen(l1); i<20; i++) lcd.print(' ');
+
+  lcd.setCursor(0,2);
+  char l2[21]; snprintf(l2,sizeof(l2),"Min %6.2f Max %6.2f",minC,maxC);
+  lcd.print(l2); for(int i=strlen(l2); i<20; i++) lcd.print(' ');
+
+  lcd.setCursor(0,3);
+  lcd.print("SMS "); lcd.print(lastSmsInfo);
+  int used=4+lastSmsInfo.length(); while(used++<20) lcd.print(' ');
+}
+
+// ---------- Config (Preferences) ----------
+void loadConfig(){
+  prefs.begin("bbtemp",true);
+  cfg.offsetC = prefs.getFloat("ofsC",0.0);
+  cfg.lowC    = clampT(prefs.getFloat("lowC",2.0f),-20.0f,40.0f);
+  cfg.highC   = clampT(prefs.getFloat("highC",6.0f),-20.0f,40.0f);
+  if(cfg.highC<=cfg.lowC){cfg.lowC=2.0; cfg.highC=6.0;}
+  cfg.phones  = prefs.getString("phones","");
+  cfg.soundEnable = prefs.getBool("sound",true);
+  cfg.callEnable  = prefs.getBool("call",false);
+  cfg.smsIntervalMin = clampT((uint16_t)prefs.getUShort("smsMin",5), (uint16_t)1, (uint16_t)1440);
+  prefs.end();
+}
+void saveConfig(){
+  prefs.begin("bbtemp",false);
+  prefs.putFloat("ofsC",cfg.offsetC);
+  prefs.putFloat("lowC",cfg.lowC);
+  prefs.putFloat("highC",cfg.highC);
+  prefs.putString("phones",cfg.phones);
+  prefs.putBool("sound",cfg.soundEnable);
+  prefs.putBool("call",cfg.callEnable);
+  prefs.putUShort("smsMin",cfg.smsIntervalMin);
+  prefs.end();
+}
+void loadDefaultsAndSave(){
+  cfg.offsetC = 0.0;
+  cfg.lowC    = 2.0;
+  cfg.highC   = 6.0;
+  cfg.phones  = "";
+  cfg.soundEnable = true;
+  cfg.callEnable  = false;
+  cfg.smsIntervalMin = 5;
+  saveConfig();
+}
+
+// ---------- GSM (SMS/Call + time) ----------
+void gsmSend(const String&s){ GSM.print(s); }
+bool waitForChar(char ch,uint32_t ms=7000){
+  uint32_t t=millis();
+  while(millis()-t<ms){ while(GSM.available()){ if(GSM.read()==ch) return true; } }
+  return false;
+}
+String gsmReadAll(uint32_t ms=200){
+  uint32_t t=millis(); String r;
+  while(millis()-t<ms){ while(GSM.available()){ r += (char)GSM.read(); } }
+  return r;
+}
+void gsmInit(){
+  GSM.begin(GSM_BAUD,SERIAL_8N1,GSM_RX_PIN,GSM_TX_PIN);
+  delay(400); GSM.setTimeout(2000);
+  gsmSend("AT\r"); delay(150); gsmReadAll();
+  gsmSend("ATE0\r"); delay(150); gsmReadAll();
+  gsmSend("AT+CMGF=1\r"); delay(150); gsmReadAll();
+  gsmSend("AT+CSCS=\"GSM\"\r"); delay(150); gsmReadAll();
+  gsmSend("AT+CLTS=1\r"); delay(200); gsmReadAll(); // network time update if supported
+}
+
+// Try to refresh lastTimeStr using +CCLK?
+void gsmPollTime(){
+  if(millis()-lastGsmTimePoll < GSM_TIME_POLL_MS) return;
+  lastGsmTimePoll = millis();
+  gsmSend("AT+CCLK?\r");
+  delay(200);
+  String r = gsmReadAll(400);
+  int p = r.indexOf("+CCLK: ");
+  if(p>=0){
+    int q = r.indexOf('\n', p);
+    String line = (q>p) ? r.substring(p, q) : r.substring(p);
+    // Expect: +CCLK: "yy/MM/dd,HH:MM:SS+TZ"
+    int q1 = line.indexOf('"'), q2 = line.indexOf('"', q1+1);
+    if(q1>=0 && q2>q1){
+      String ts = line.substring(q1+1, q2);
+      if(ts.length() >= 17){
+        String yy=ts.substring(0,2), MM=ts.substring(3,5), dd=ts.substring(6,8);
+        String hh=ts.substring(9,11), mi=ts.substring(12,14), ss=ts.substring(15,17);
+        lastTimeStr = String("20")+yy+"-"+MM+"-"+dd+" "+hh+":"+mi+":"+ss;
+      } else {
+        lastTimeStr = ts; // fallback raw
+      }
+    }
+  }
+}
+
+void sendSMS_one(const String&to,const String&body){
+  if(to.length()<3) return;
+  gsmSend("AT+CMGS=\""+to+"\"\r");
+  if(!waitForChar('>',8000)){ lastSmsInfo="no-prompt"; return; }
+  gsmSend(body); GSM.write(26);
+  lastSmsInfo="sent";
+}
+void broadcastSMS(const String&body){
+  if(!cfg.phones.length()) return;
+  int i=0; while(i<cfg.phones.length()){
+    int c=cfg.phones.indexOf(',',i);
+    String num=(c==-1)?cfg.phones.substring(i):cfg.phones.substring(i,c);
+    num.trim(); if(num.length()>=3) sendSMS_one(num,body);
+    if(c==-1) break; i=c+1;
+  }
+}
+String firstPhone(){ String s=cfg.phones; s.trim(); int c=s.indexOf(','); if(c>0) s=s.substring(0,c); s.trim(); return s; }
+void placeCallOnce(){
+  if(!cfg.callEnable){ lastCallInfo="off"; return; }
+  String n=firstPhone(); if(n.length()<3){ lastCallInfo="no-num"; return; }
+  gsmSend("ATD"+n+";\r"); lastCallInfo="dialing";
+  uint32_t t0=millis(); while(millis()-t0<20000) delay(10);
+  gsmSend("ATH\r"); lastCallInfo="called";
+}
+
+// ---------- LittleFS logging ----------
+bool fsInit(){ if(fsOk) return true; fsOk=LittleFS.begin(true); return fsOk; }
+void openLogAppend(){
+  if(!fsInit()) return;
+  if(logFile) logFile.close();
+  if(!LittleFS.exists("/log.csv")){
+    File f=LittleFS.open("/log.csv",FILE_WRITE);
+    if(f){ f.println("timestamp,tempC,alarm"); f.close(); }
+  }
+  logFile=LittleFS.open("/log.csv",FILE_APPEND);
+}
+void rotateLogIfNeeded(){
+  if(!fsInit()) return; File f=LittleFS.open("/log.csv",FILE_READ); if(!f) return;
+  size_t sz=f.size(); f.close(); if(sz<LOG_MAX_BYTES) return;
+  LittleFS.remove("/log_old.csv"); LittleFS.rename("/log.csv","/log_old.csv"); openLogAppend();
+}
+String uptimeHMS(uint32_t ms){
+  uint32_t s=ms/1000, h=s/3600, m=(s%3600)/60, ss=s%60;
+  char b[16]; snprintf(b,sizeof(b),"%02u:%02u:%02u",(unsigned)h,(unsigned)m,(unsigned)ss);
+  return String(b);
+}
+String currentTimestampLabel(){
+  if(lastTimeStr.length()) return lastTimeStr;        // GSM time if available
+  return String("UP ")+uptimeHMS(millis());           // else uptime
+}
+void appendLogRow(float t, bool alarm){
+  if(!fsInit()) return; if(!logFile) openLogAppend(); if(!logFile) return;
+  logFile.print(currentTimestampLabel()); logFile.print(",");
+  logFile.print(t,3); logFile.print(",");
+  logFile.println(alarm?1:0);
+  logFile.flush();
+}
+String readWholeLogCsv(){
+  if(!fsInit()) return "";
+  String out; bool header=false;
+  auto add=[&](const char* p){ File f=LittleFS.open(p,FILE_READ); if(!f) return;
+    if(header) (void)f.readStringUntil('\n');
+    while(f.available()) out+=(char)f.read(); f.close(); header=true; };
+  if(LittleFS.exists("/log_old.csv")) add("/log_old.csv"); add("/log.csv"); return out;
+}
+
+// ---------- Web: dashboard (bold & clean, with Phone Siren ON/OFF) ----------
+String htmlDash(){
+  String h = String(F(
+"<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
+"<title>Blood Bank Monitor</title>"
+"<style>"
+"body{margin:0;font:16px ui-sans-serif;background:linear-gradient(180deg,#0b1020,#0f172a)}"
+".wrap{max-width:1000px;margin:auto;padding:18px}"
+".card{background:rgba(15,23,42,.9);border:1px solid rgba(148,163,184,.16);border-radius:16px;box-shadow:0 10px 28px rgba(2,6,23,.4);padding:18px;color:#e5e7eb}"
+"h1{margin:0 0 8px;font-size:22px;color:#e2e8f0}"
+".big{font-size:56px;font-weight:900;text-align:center;letter-spacing:0.5px}"
+".pill{padding:6px 12px;border-radius:999px;border:1px solid #1f2937;font-weight:700}"
+".ok{background:#052e2b;color:#bbf7d0;border-color:#145a55}"
+".bad{background:#3a0d0d;color:#fecaca;border-color:#7f1d1d}"
+".btn{border:1px solid #334155;background:#0b1220;border-radius:12px;padding:10px 14px;text-decoration:none;color:#e5e7eb;display:inline-block;margin-right:8px}"
+".row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}"
+".meta{display:grid;grid-template-columns:150px 1fr;gap:8px;margin-top:10px;color:#cbd5e1}"
+".banner{display:none;margin-top:12px;background:#3a0d0d;border:1px solid #7f1d1d;color:#fecaca;padding:10px;border-radius:12px}"
+".canvas{margin-top:16px;background:#0b1220;border:1px solid #1f2937;border-radius:16px;box-shadow:0 6px 20px rgba(2,6,23,.35);padding:12px}"
+"canvas{width:100%;height:240px;border-radius:12px}"
+"</style></head><body>"
+"<div class='wrap'>"
+"<div class='row'><h1>Blood Bank & Cold Room Monitor</h1>"
+"<div>"
+"<a class='btn' href='/settings'>Settings</a>"
+"<a class='btn' href='/history'>History</a>"
+"<button id='phoneOn' class='btn'>Phone Siren ON</button>"
+"<button id='phoneOff' class='btn'>Phone Siren OFF</button>"
+"<button id='on' class='btn'>Buzzer ON</button>"
+"<button id='off' class='btn'>Buzzer OFF</button>"
+"</div></div>"
+"<div class='card'>"
+"<div class='row'><div>Status</div><span id='st' class='pill'>—</span></div>"
+"<div class='big' id='t'>--.-°C</div>"
+"<div class='meta'>"
+"<div>Range</div><div id='rng'>2.0–6.0 °C</div>"
+"<div>Min / Max</div><div id='mm'>— / — °C</div>"
+"<div>Alerts</div><div>SMS: <span id='sms'>—</span> &nbsp; Call: <span id='call'>—</span></div>"
+"<div>Last Time</div><div id='ts'>—</div>"
+"</div>"
+"<div id='ban' class='banner'></div>"
+"</div>"
+"<div class='canvas'><canvas id='bars'></canvas></div>"
+"</div>"
+"<script>"
+"const $=s=>document.querySelector(s);"
+"let audioOK=false,ac,osc,mainGain,lfoOsc,lfoGain,timer=null,phoneEnabled=false;"
+"function initAudio(){if(audioOK)return;try{ac=new (window.AudioContext||window.webkitAudioContext)();mainGain=ac.createGain();mainGain.gain.value=0;mainGain.connect(ac.destination);osc=ac.createOscillator();osc.type='square';osc.frequency.value=800;osc.connect(mainGain);osc.start();lfoOsc=ac.createOscillator();lfoOsc.frequency.value=10;lfoGain=ac.createGain();lfoGain.gain.value=0.25;lfoOsc.connect(lfoGain);lfoGain.connect(mainGain.gain);lfoOsc.start();if(ac.state==='suspended')ac.resume();audioOK=true;}catch(e){}}"
+"function startSiren(){if(!audioOK||!phoneEnabled||timer)return;mainGain.gain.setTargetAtTime(0.20,ac.currentTime,0.03);const step=()=>{const t=ac.currentTime;osc.frequency.cancelScheduledValues(t);osc.frequency.setValueAtTime(650,t);osc.frequency.linearRampToValueAtTime(1200,t+0.6);osc.frequency.linearRampToValueAtTime(650,t+1.2);} ;step();timer=setInterval(step,1200);if(navigator.vibrate)navigator.vibrate([800,200,800,200,1000]);}"
+"function stopSiren(){if(!audioOK)return;if(timer){clearInterval(timer);timer=null;}mainGain.gain.setTargetAtTime(0,ac.currentTime,0.03);}"
+"$('#phoneOn').onclick=()=>{initAudio();phoneEnabled=true;};"
+"$('#phoneOff').onclick=()=>{phoneEnabled=false;stopSiren();};"
+"document.getElementById('on').onclick=()=>fetch('/api/sound?on=1');"
+"document.getElementById('off').onclick=()=>fetch('/api/sound?on=0');"
+"async function pull(){try{const r=await fetch('/api/info');const j=await r.json();$('#t').textContent=(isFinite(j.temp)?j.temp.toFixed(1):'--')+'°C';$('#rng').textContent=${j.low.toFixed(1)}–${j.high.toFixed(1)} °C;$('#mm').textContent=${j.min.toFixed(1)} / ${j.max.toFixed(1)} °C;$('#sms').textContent=j.lastSms;$('#call').textContent=j.lastCall;$('#ts').textContent=j.time||'—';const st=$('#st'),bn=$('#ban');if(j.alarm){st.textContent='ALARM';st.className='pill bad';bn.style.display='block';bn.textContent=${j.temp.toFixed(1)}°C outside ${j.low.toFixed(1)}–${j.high.toFixed(1)}°C;startSiren();}else{st.textContent='OK';st.className='pill ok';bn.style.display='none';stopSiren();}}catch(e){}}"
+"async function bars(){try{const res=await fetch('/log.csv');if(!res.ok)return;const txt=await res.text();const rows=txt.trim().split(/\\r?\\n/);if(rows.length<2)return;const a=[];for(let i=1;i<rows.length;i++){const [ts,tc,al]=rows[i].split(',');if(!ts)continue;a.push({ts:ts,t:parseFloat(tc),a:+al});}const N=Math.min(48,a.length);const sub=a.slice(-N);const c=$('#bars'),x=c.getContext('2d');const DPR=window.devicePixelRatio||1;const W=c.clientWidth,H=c.clientHeight;c.width=W*DPR;c.height=H*DPR;x.scale(DPR,DPR);x.clearRect(0,0,W,H);if(sub.length<2){x.fillStyle='#94a3b8';x.fillText('No data yet',10,20);return;}const L=70,R=20,T=16,B=40,w=W-L-R,h=H-T-B;const vals=sub.map(o=>o.t);let lo=Math.min(...vals,1.0),hi=Math.max(...vals,7.0);const X=i=>L+i*(w/(sub.length-1)),Y=v=>T+(1-(v-lo)/(hi-lo))h;x.strokeStyle='rgba(148,163,184,.25)';x.beginPath();for(let i=0;i<=5;i++){const gy=T+i*h/5;x.moveTo(L,gy);x.lineTo(W-R,gy);}x.stroke();x.fillStyle='rgba(59,130,246,.12)';const y6=Y(6),y2=Y(2);x.fillRect(L,Math.min(y6,y2),w,Math.abs(y2-y6));x.strokeStyle='rgba(239,68,68,.7)';x.beginPath();x.moveTo(L,Y(2));x.lineTo(W-R,Y(2));x.moveTo(L,Y(6));x.lineTo(W-R,Y(6));x.stroke();x.strokeStyle='#22c55e';x.lineWidth=2;x.beginPath();x.moveTo(X(0),Y(sub[0].t));for(let i=1;i<sub.length;i++){x.lineTo(X(i),Y(sub[i].t));}x.stroke();x.fillStyle='#94a3b8';x.font='12px system-ui';const tickN=Math.min(8,sub.length);for(let i=0;i<tickN;i++){const idx=Math.floor(i(sub.length-1)/(tickN-1));const px=X(idx);x.fillText(sub[idx].ts, px-30, H-10);}for(let i=0;i<=4;i++){const val=lo+i*(hi-lo)/4;const py=Y(val);x.fillText(val.toFixed(1)+'°C',6,py-4);} }catch(e){}}"
+"pull();bars();setInterval(pull,1500);setInterval(bars,60000);"
+"</script></body></html>"
+));
+  return h;
+}
+
+// ---------- Web: settings (persists + SMS interval + Reset buttons) ----------
+String htmlSettings(){
+  String h;
+  h += F("<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
+  "<title>Settings</title><style>"
+  "body{margin:0;background:#0b1020;color:#e5e7eb;font:16px ui-sans-serif}"
+  ".wrap{max-width:800px;margin:18px auto;padding:0 16px}"
+  ".card{background:#0f172a;border:1px solid rgba(148,163,184,.16);border-radius:14px;padding:16px;margin:12px 0}"
+  "label{display:block;margin:10px 0 6px;color:#cbd5e1;font-size:14px}"
+  "input,button{font-size:16px;padding:10px 12px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#e5e7eb}"
+  ".row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}"
+  ".btn{display:inline-block;padding:10px 14px;border-radius:12px;border:1px solid #334155;color:#cbd5e1;text-decoration:none}"
+  ".toast{position:fixed;right:16px;bottom:16px;background:#111827;border:1px solid rgba(148,163,184,.25);padding:10px 14px;border-radius:12px;opacity:0;transform:translateY(8px);transition:.25s}"
+  ".toast.show{opacity:1;transform:translateY(0)}"
+  "</style></head><body>");
+
+  h += F("<div class='wrap'>"
+  "<a class='btn' href='/'>Dashboard</a> <a class='btn' href='/history'>History</a>"
+  "<div class='card'><h3>Temperature Range</h3>"
+  "<div class='row'><div><label>Low (°C)</label><input id='low' type='number' step='0.1'></div>"
+  "<div><label>High (°C)</label><input id='high' type='number' step='0.1'></div></div>"
+  "</div>"
+  "<div class='card'><h3>Calibration</h3>"
+  "<div class='row'><div>Measured: <b id='meas'>--.--</b> °C</div></div>"
+  "<label>True value (°C)</label><input id='truev' type='number' step='0.01' placeholder='e.g., 4.00'>"
+  "<div class='row' style='margin-top:10px'><button id='apply'>Apply Offset</button>"
+  "<div>Offset: <input id='offset' type='number' step='0.01' style='width:120px'></div></div>"
+  "<div class='row' style='margin-top:10px'><button id='resetmm'>Reset Min/Max</button></div>"
+  "</div>"
+  "<div class='card'><h3>Alerts</h3>"
+  "<div class='row'><label><input id='devsnd' type='checkbox'> Device Sound (buzzer)</label></div>"
+  "<div class='row'><label><input id='call' type='checkbox'> Phone call on alarm</label></div>"
+  "<label>Phone numbers (comma-separated)</label><input id='phones' placeholder='+23490xxxxxxx,+23481xxxxxxx'>"
+  "<label>SMS interval (minutes)</label><input id='smsmin' type='number' min='1' max='1440' step='1'>"
+  "<div class='row' style='margin-top:10px'><button id='save'>Save</button> <button id='test'>Send Test SMS</button></div>"
+  "</div>"
+  "<div class='card'><h3>Data</h3>"
+  "<a class='btn' href='/export'>Export CSV</a> <a class='btn' href='/api/info'>API JSON</a>"
+  "</div>"
+  "<div class='card'><h3>Maintenance</h3>"
+  "<div class='row'>"
+  "<button id='clearlog'>Clear Log</button>"
+  "<button id='factory' style='border-color:#7f1d1d;color:#fecaca;background:#3a0d0d'>Factory Reset</button>"
+  "</div>"
+  "<small>Factory Reset restores defaults, clears saved settings and reboots.</small>"
+  "</div>");
+
+  h += F("<div id='toast' class='toast'>Saved</div></div>"
+  "<script>"
+  "const $=s=>document.querySelector(s);function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500);}"
+  "async function seed(){const a=await fetch('/api/info');const j=await a.json();$('#meas').textContent=j.temp.toFixed(2);$('#offset').value=j.offset.toFixed(2);$('#low').value=j.low.toFixed(1);$('#high').value=j.high.toFixed(1);const b=await fetch('/api/getcfg');const c=await b.json();$('#phones').value=c.phones||'';$('#devsnd').checked=c.sound;$('#call').checked=c.call;$('#smsmin').value=c.smsmin||5;}"
+  "$('#apply').onclick=()=>{const m=parseFloat($('#meas').textContent),t=parseFloat($('#truev').value);if(isNaN(t))return toast('Enter a valid value');$('#offset').value=(t-m).toFixed(2);};"
+  "$('#save').onclick=async()=>{const fd=new FormData();fd.append('ofs',$('#offset').value);fd.append('low',$('#low').value);fd.append('high',$('#high').value);fd.append('phones',$('#phones').value);fd.append('smsmin',$('#smsmin').value);if($('#devsnd').checked)fd.append('sound','1');if($('#call').checked)fd.append('call','1');const r=await fetch('/api/savecfg',{method:'POST',body:fd});if(r.ok)toast('Saved');};"
+  "$('#test').onclick=async()=>{const r=await fetch('/api/testsms');if(r.ok)toast('Test SMS sent');};"
+  "$('#resetmm').onclick=async()=>{if(!confirm('Reset Min/Max to current temperature?'))return;await fetch('/api/resetminmax');toast('Min/Max reset');};"
+  "$('#clearlog').onclick=async()=>{if(!confirm('Clear all logged data (CSV)?'))return;await fetch('/api/clearlog');toast('Log cleared');};"
+  "$('#factory').onclick=async()=>{if(!confirm('Factory reset and reboot now?'))return;await fetch('/api/factoryreset');toast('Rebooting…');};"
+  "seed();"
+  "</script></body></html>");
+
+  return h;
+}
+
+// ---------- History page (uses timestamps in CSV) ----------
+void handleHistory(){
+  String h;
+  h += F("<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
+         "<title>History</title><style>"
+         "body{margin:0;background:#0b1020;color:#e5e7eb;font:16px ui-sans-serif}"
+         ".wrap{max-width:1024px;margin:18px auto;padding:0 16px}"
+         ".card{background:#0f172a;border:1px solid rgba(148,163,184,.16);border-radius:14px;padding:16px}"
+         "canvas{width:100%;height:380px;border-radius:12px}"
+         "a.btn{display:inline-block;padding:10px 14px;border-radius:12px;border:1px solid #334155;color:#cbd5e1;text-decoration:none;margin:12px 0}"
+         "</style></head><body>");
+  h += F("<div class='wrap'><a class='btn' href='/'>Dashboard</a> <a class='btn' href='/settings'>Settings</a> <a class='btn' href='/log.csv'>Download CSV</a>"
+         "<div class='card'><h3 style='margin:0 0 10px'>Temperature Over Time</h3><canvas id='c'></canvas>"
+         "<small>Timestamp from GSM clock when available, else device uptime.</small></div></div>");
+  h += F("<script>"
+"async function load(){const r=await fetch('/log.csv');if(!r.ok)return null;const t=await r.text();const L=t.trim().split(/\\r?\\n/);if(L.length<2)return null;const a=[];for(let i=1;i<L.length;i++){const [ts,tc,al]=L[i].split(',');if(!ts)continue;a.push({ts:ts,t:+tc,a:+al});}return a;}"
+"function draw(d){const c=document.getElementById('c');const x=c.getContext('2d');const W=c.clientWidth,H=c.clientHeight;c.width=W*devicePixelRatio;c.height=H*devicePixelRatio;x.scale(devicePixelRatio,devicePixelRatio);x.clearRect(0,0,W,H);if(!d||d.length<2){x.fillStyle='#94a3b8';x.fillText('No data yet',10,20);return;}const L=70,R=20,T=16,B=50;const w=W-L-R,h=H-T-B;const vals=d.map(v=>v.t);let lo=Math.min(...vals,1.0),hi=Math.max(...vals,7.0);const X=i=>L+i*(w/(d.length-1)),Y=v=>T+(1-(v-lo)/(hi-lo))h;x.strokeStyle='rgba(148,163,184,.25)';x.beginPath();for(let i=0;i<=5;i++){const gy=T+i*h/5;x.moveTo(L,gy);x.lineTo(W-R,gy);}x.stroke();x.fillStyle='rgba(59,130,246,.10)';const y6=Y(6),y2=Y(2);x.fillRect(L,Math.min(y6,y2),w,Math.abs(y2-y6));x.strokeStyle='rgba(239,68,68,.7)';x.beginPath();x.moveTo(L,Y(2));x.lineTo(W-R,Y(2));x.moveTo(L,Y(6));x.lineTo(W-R,Y(6));x.stroke();x.strokeStyle='#22c55e';x.lineWidth=2;x.beginPath();x.moveTo(X(0),Y(d[0].t));for(let i=1;i<d.length;i++){x.lineTo(X(i),Y(d[i].t));}x.stroke();x.fillStyle='#94a3b8';x.font='12px system-ui';const tickN=Math.min(8,d.length);for(let i=0;i<tickN;i++){const idx=Math.floor(i(d.length-1)/(tickN-1));const px=X(idx);x.fillText(d[idx].ts, px-30, H-10);}for(let i=0;i<=4;i++){const val=lo+i*(hi-lo)/4;const py=Y(val);x.fillText(val.toFixed(1)+'°C',6,py-4);} }"
+"(async()=>{const d=await load();draw(d);})();"
+"</script></body></html>");
+  server.send(200,"text/html",h);
+}
+
+// ---------- API ----------
+void handleInfo(){
+  String j = "{";
+  j += "\"temp\":"   + String(tempFilt,2) + ",";
+  j += "\"low\":"    + String(cfg.lowC,2) + ",";
+  j += "\"high\":"   + String(cfg.highC,2) + ",";
+  j += "\"offset\":" + String(cfg.offsetC,2) + ",";
+  j += "\"alarm\":";
+  j += (alarmState==ALARM ? "true" : "false");
+  j += ",";
+  j += "\"min\":"    + String(minC,2) + ",";
+  j += "\"max\":"    + String(maxC,2) + ",";
+  j += "\"time\":\"" + (lastTimeStr.length()? lastTimeStr : uptimeHMS(millis())) + "\",";
+  j += "\"lastSms\":\""  + lastSmsInfo  + "\",";
+  j += "\"lastCall\":\"" + lastCallInfo + "\"";
+  j += "}";
+  server.send(200,"application/json",j);
+}
+void handleGetCfg(){
+  String j = "{";
+  j += "\"phones\":\"" + cfg.phones + "\",";
+  j += "\"sound\":" + String(cfg.soundEnable ? "true" : "false") + ",";
+  j += "\"call\":"  + String(cfg.callEnable  ? "true" : "false") + ",";
+  j += "\"smsmin\":" + String((int)cfg.smsIntervalMin);
+  j += "}";
+  server.send(200,"application/json",j);
+}
+void handleSaveCfg(){
+  if(server.method()!=HTTP_POST){server.send(405,"text/plain","POST only");return;}
+  if(server.hasArg("ofs"))    cfg.offsetC=clampT(server.arg("ofs").toFloat(),-5.0f,5.0f);
+  if(server.hasArg("low"))    cfg.lowC   =clampT(server.arg("low").toFloat(),-20.0f,40.0f);
+  if(server.hasArg("high"))   cfg.highC  =clampT(server.arg("high").toFloat(),-20.0f,40.0f);
+  if(cfg.highC<=cfg.lowC){cfg.lowC=2.0; cfg.highC=6.0;}
+  if(server.hasArg("phones")) cfg.phones = server.arg("phones");
+  cfg.soundEnable = server.hasArg("sound");
+  cfg.callEnable  = server.hasArg("call");
+  if(server.hasArg("smsmin")){
+    int v = server.arg("smsmin").toInt();
+    cfg.smsIntervalMin = clampT((uint16_t)(v>0?v:5), (uint16_t)1, (uint16_t)1440);
+  }
+  saveConfig(); server.send(200,"text/plain","ok");
+}
+void handleTestSMS(){ broadcastSMS("Blood Bank Monitor TEST — T="+String(tempFilt,2)+"C"); server.send(200,"text/plain","ok"); }
+void handleSound(){
+  if(server.hasArg("on")){ cfg.soundEnable=(server.arg("on")=="1"); saveConfig(); }
+  server.send(200,"application/json",String("{\"sound\":")+(cfg.soundEnable?"true":"false")+"}");
+}
+void handleLogCsv(){ String csv=readWholeLogCsv(); if(csv.length()==0){server.send(404,"text/plain","No log"); return;} server.send(200,"text/csv",csv); }
+void handleExport(){ String csv=readWholeLogCsv(); if(csv.length()==0){server.send(404,"text/plain","No log"); return;} server.sendHeader("Content-Disposition","attachment; filename=log.csv"); server.send(200,"text/csv",csv); }
+
+// --- Maintenance APIs ---
+void handleResetMinMax(){ minC=tempFilt; maxC=tempFilt; server.send(200,"text/plain","ok"); }
+void handleClearLog(){
+  if(logFile){ logFile.close(); }
+  if(fsInit()){ LittleFS.remove("/log.csv"); LittleFS.remove("/log_old.csv"); openLogAppend(); }
+  server.send(200,"text/plain","ok");
+}
+void handleFactoryReset(){
+  // Clear prefs namespace
+  prefs.begin("bbtemp", false);
+  prefs.clear();
+  prefs.end();
+  // Restore defaults
+  loadDefaultsAndSave();
+  server.send(200, "text/plain", "restarting");
+  delay(250);
+  ESP.restart();
+}
+
+// ---------- Alarm logic ----------
+inline bool outOfRange(float t){return t<cfg.lowC || t>cfg.highC;}
+
+void buzzerPatternUpdate(){
+  static bool hi=false; static uint32_t toggleT=0; const uint32_t now=millis();
+  if(!cfg.soundEnable){ ledcWrite(LEDC_CH,0); digitalWrite(RELAY_PIN,(alarmState==ALARM)?HIGH:LOW); return; }
+  if(alarmState==PREALARM){
+    // Gentle chirp while pre-alarm
+    const uint32_t period=1500,on=220;
+    if((now%period)<on){ ledcWriteTone(LEDC_CH,1000); ledcWrite(LEDC_CH,LEDC_DUTY);}
+    else ledcWrite(LEDC_CH,0);
+    digitalWrite(RELAY_PIN,LOW);
+  } else if(alarmState==ALARM){
+    // Fire-alarm whoop
+    if(now-toggleT>=500){ toggleT=now; hi=!hi; ledcWriteTone(LEDC_CH,hi?880:660); ledcWrite(LEDC_CH,LEDC_DUTY); }
+    digitalWrite(RELAY_PIN,HIGH);
+  } else {
+    ledcWrite(LEDC_CH,0); digitalWrite(RELAY_PIN,LOW);
+  }
+}
+
+void enterState(AlarmState s){
+  alarmState=s;
+  if(s==ALARM){
+    String msg="ALERT: Temp="+String(tempFilt,2)+"C (range "+String(cfg.lowC,1)+"-"+String(cfg.highC,1)+"C)";
+    broadcastSMS(msg); lastSmsMs=millis();
+    if(cfg.callEnable){ placeCallOnce(); lastCallMs=millis(); }
+  }
+}
+
+// ---------- Setup / Loop ----------
+void setup(){
+  Serial.begin(115200);
+  pinMode(RELAY_PIN,OUTPUT); digitalWrite(RELAY_PIN,LOW);
+  pinMode(BUZZER_PIN,OUTPUT);
+  ledcSetup(LEDC_CH,1000,LEDC_RES); ledcAttachPin(BUZZER_PIN,LEDC_CH); ledcWrite(LEDC_CH,0);
+
+  analogReadResolution(12);
+
+  Wire.begin(); lcd.init(); lcd.backlight(); lcdSplash();
+  loadConfig(); fsInit(); openLogAppend(); rotateLogIfNeeded();
+
+  WiFi.mode(WIFI_AP); WiFi.softAP(AP_SSID,AP_PASS);
+
+  GSM.begin(GSM_BAUD,SERIAL_8N1,GSM_RX_PIN,GSM_TX_PIN); delay(300); gsmInit();
+
+  server.on("/",            [](){ server.send(200,"text/html",htmlDash()); });
+  server.on("/settings",    [](){ server.send(200,"text/html",htmlSettings()); });
+  server.on("/history",     handleHistory);
+  server.on("/api/info",    handleInfo);
+  server.on("/api/getcfg",  handleGetCfg);
+  server.on("/api/savecfg", HTTP_POST, handleSaveCfg);
+  server.on("/api/testsms", handleTestSMS);
+  server.on("/api/sound",   handleSound);
+  server.on("/log.csv",     handleLogCsv);
+  server.on("/export",      handleExport);
+  // Maintenance
+  server.on("/api/resetminmax", handleResetMinMax);
+  server.on("/api/clearlog",    handleClearLog);
+  server.on("/api/factoryreset",handleFactoryReset);
+
+  server.onNotFound([](){ server.send(404,"text/plain","Not found"); });
+  server.begin();
+
+  // initial temperature & smoothing
+  float t0=readNTC_Celsius_multi(PER_READ_SAMPLES)+cfg.offsetC;
+  for(int i=0;i<AVG_N;i++) avgBuf[i]=t0; avgFill=AVG_N;
+  tempFilt=minC=maxC=t0; lcd.clear();
+}
+
+void loop(){
+  server.handleClient();
+
+  // Keep trying to fetch GSM time (for timestamps)
+  gsmPollTime();
+
+  if(millis()-lastSample>=SAMPLE_MS){
+    lastSample=millis();
+    float t=readNTC_Celsius_multi(PER_READ_SAMPLES)+cfg.offsetC;
+    tempFilt=filtTempMA(t);
+
+    if(isnan(minC)||tempFilt<minC) minC=tempFilt;
+    if(isnan(maxC)||tempFilt>maxC) maxC=tempFilt;
+
+    bool out=outOfRange(tempFilt);
+    if(out){ outCnt++; inCnt=0; } else { inCnt++; outCnt=0; }
+
+    if(alarmState==NORMAL   && outCnt>=PREALARM_SEC) enterState(PREALARM);
+    if(alarmState==PREALARM && outCnt>=ALARM_SEC)   enterState(ALARM);
+    if((alarmState==PREALARM||alarmState==ALARM) && inCnt>=CLEAR_SEC){
+      alarmState=NORMAL; lastSmsInfo="cleared"; lastCallInfo="cleared";
+    }
+
+    // Repeat SMS while alarm is ON per user-set interval
+    if(alarmState==ALARM){
+      uint32_t interval_ms = (uint32_t)cfg.smsIntervalMin * 60UL * 1000UL;
+      if(millis()-lastSmsMs >= interval_ms){
+        broadcastSMS("REMINDER: Temp="+String(tempFilt,2)+"C outside "+String(cfg.lowC,1)+"-"+String(cfg.highC,1)+"C");
+        lastSmsMs=millis();
+      }
+    }
+
+    lcdScreen();
+
+    if(millis()-lastLogWrite>=LOG_WRITE_MS){
+      lastLogWrite=millis(); rotateLogIfNeeded(); appendLogRow(tempFilt,(alarmState==ALARM));
+    }
+  }
+
+  buzzerPatternUpdate();
+}

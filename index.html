@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blood Bank | Cloud Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg: #030712;
+            --card: rgba(15, 23, 42, 0.6);
+            --border: rgba(255, 255, 255, 0.08);
+            --accent: hsl(217, 91%, 60%);
+            --accent-glow: hsla(217, 91%, 60%, 0.4);
+            --text: #f8fafc;
+            --sub: #94a3b8;
+            --ok: #10b981;
+            --bad: #ef4444;
+            --glass: rgba(15, 23, 42, 0.85);
+            --panel: rgba(30, 41, 59, 0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body {
+            margin: 0;
+            background: radial-gradient(circle at top right, #0f172a, #020617);
+            color: var(--text);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        .wrap {
+            max-width: 1000px;
+            margin: auto;
+            padding: 40px 24px;
+        }
+
+        /* Navigation */
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 50px;
+            padding: 16px 24px;
+            background: var(--glass);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .logo {
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo span {
+            font-weight: 300;
+            color: var(--sub);
+        }
+
+        .logo-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--ok);
+            box-shadow: 0 0 15px var(--ok);
+            position: relative;
+        }
+
+        .logo-dot::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 2px solid var(--ok);
+            opacity: 0.3;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                opacity: 0.5;
+            }
+
+            100% {
+                transform: scale(2);
+                opacity: 0;
+            }
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 12px;
+        }
+
+        .nav-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            padding: 10px 20px;
+            border-radius: 14px;
+            color: var(--sub);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .nav-btn.active {
+            background: var(--accent);
+            color: white;
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+
+        .nav-btn:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+        }
+
+        /* Main Display */
+        .page {
+            display: none;
+            animation: slideUp 0.5s ease-out;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .hero-card {
+            background: var(--card);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 40px;
+            padding: 60px 24px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 40px 100px rgba(0, 0, 0, 0.5);
+            margin-bottom: 40px;
+        }
+
+        .status-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 20px;
+            border-radius: 99px;
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 32px;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--ok);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .status-chip.critical {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--bad);
+            border-color: rgba(239, 68, 68, 0.2);
+            animation: shake 0.5s infinite;
+        }
+
+        @keyframes shake {
+
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+
+            25% {
+                transform: translateX(-2px);
+            }
+
+            75% {
+                transform: translateX(2px);
+            }
+        }
+
+        .temp-main {
+            font-size: 140px;
+            font-weight: 950;
+            letter-spacing: -8px;
+            line-height: 0.8;
+            margin: 0;
+            background: linear-gradient(180deg, #fff 30%, var(--sub) 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
+        }
+
+        .temp-main span {
+            font-size: 40px;
+            font-weight: 300;
+            color: var(--sub);
+            vertical-align: top;
+            margin-left: 8px;
+            -webkit-text-fill-color: var(--sub);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 24px;
+            margin-top: 50px;
+        }
+
+        .stat-box {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            padding: 24px;
+            border-radius: 28px;
+            text-align: left;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-box:hover {
+            border-color: var(--accent);
+            transform: translateY(-5px);
+            background: rgba(30, 41, 59, 0.6);
+        }
+
+        .stat-label {
+            color: var(--sub);
+            font-size: 12px;
+            text-transform: uppercase;
+            font-weight: 800;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        .stat-val {
+            font-size: 24px;
+            font-weight: 700;
+            color: white;
+        }
+
+        /* Controls */
+        .btn-action {
+            flex: 1;
+            padding: 16px;
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            font-weight: 700;
+            font-size: 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            text-align: center;
+            width: 100%;
+        }
+
+        .btn-action:hover {
+            background: white;
+            color: var(--bg);
+            transform: scale(1.02);
+        }
+
+        .btn-action.danger:hover {
+            background: var(--bad);
+            color: white;
+            border-color: var(--bad);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+        }
+
+        /* Settings Form Improvements */
+        .form-group {
+            margin-bottom: 28px;
+            position: relative;
+        }
+
+        .sync-badge {
+            position: absolute;
+            right: 0;
+            top: 0;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: var(--sub);
+            color: var(--bg);
+        }
+
+        .sync-badge.applied {
+            background: var(--ok);
+            color: white;
+        }
+
+        .sync-badge.pending {
+            background: #f59e0b;
+            color: white;
+            animation: blink 1.5s infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.6;
+            }
+        }
+
+        input {
+            width: 100%;
+            padding: 18px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            color: var(--text);
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        /* Checkbox styling */
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 16px;
+            margin-bottom: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .toggle-group label {
+            margin: 0;
+        }
+
+        input[type="checkbox"] {
+            width: 48px;
+            height: 24px;
+            appearance: none;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            position: relative;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        input[type="checkbox"]:checked {
+            background: var(--ok);
+        }
+
+        input[type="checkbox"]::after {
+            content: '';
+            position: absolute;
+            left: 4px;
+            top: 4px;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        input[type="checkbox"]:checked::after {
+            left: 28px;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            left: 50%;
+            bottom: 40px;
+            transform: translateX(-50%) translateY(40px);
+            background: var(--accent);
+            color: white;
+            padding: 16px 32px;
+            border-radius: 20px;
+            opacity: 0;
+            transition: 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            font-weight: 700;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            z-index: 1000;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .chart-con {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 32px;
+            padding: 32px;
+            margin-top: 40px;
+        }
+
+        @media (max-width: 600px) {
+            .temp-main {
+                font-size: 80px;
+                letter-spacing: -4px;
+            }
+
+            .hero-card {
+                padding: 40px 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap" id="app">
+        <nav>
+            <div class="logo">
+                <div class="logo-dot" id="led"></div> Blood Bank <span>Portal</span>
+            </div>
+            <div class="nav-links">
+                <button class="nav-btn active" data-page="dash" onclick="App.show('dash')">Monitor</button>
+                <button class="nav-btn" data-page="sets" onclick="App.show('sets')">Settings</button>
+            </div>
+        </nav>
+
+        <!-- DASHBOARD PAGE -->
+        <main id="dash" class="page active">
+            <div class="hero-card">
+                <div id="st-chip" class="status-chip">System Secure</div>
+                <div class="temp-main" id="t-val">--.-<span>&deg;C</span></div>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Safe Range</div>
+                        <div class="stat-val" id="rng-val">-- – -- °C</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Min / Max (24h)</div>
+                        <div class="stat-val" id="mm-val">-- / -- °C</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Connection Status</div>
+                        <div class="stat-val" id="sync-val" style="display: flex; align-items: center; gap: 8px;">
+                            Waiting...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-label">GSM Link</div>
+                    <div class="stat-val" id="gsm-val">Standby</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Buzzer Control</div>
+                    <div class="control-row" style="display: flex; gap: 12px; margin-top: 8px;">
+                        <button class="btn-action danger" onclick="App.cmd(0)">Mute Alarm</button>
+                        <button class="btn-action" onclick="App.cmd(1)">Unmute</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-con">
+                <div class="stat-label" style="display:flex; justify-content:space-between;">
+                    <span>Temperature History</span>
+                    <span style="opacity: 0.5;">Last 24 Data Points</span>
+                </div>
+                <canvas id="bars" style="margin-top:20px;"></canvas>
+            </div>
+        </main>
+
+        <!-- SETTINGS PAGE -->
+        <section id="sets" class="page">
+            <div class="hero-card" style="padding: 40px; text-align: left; max-width: 600px; margin: auto;">
+                <h2 style="margin-top: 0; font-size: 28px;">Remote Setpoints</h2>
+                <p style="color: var(--sub); margin-bottom: 32px; font-size: 14px;">Define safe operating limits and
+                    notification preferences.</p>
+
+                <div class="form-group">
+                    <label>High Limit (&deg;C)</label>
+                    <div id="sync-high" class="sync-badge">Init</div>
+                    <input type="number" id="s-high" step="0.1" value="6.0">
+                </div>
+                <div class="form-group">
+                    <label>Low Limit (&deg;C)</label>
+                    <div id="sync-low" class="sync-badge">Init</div>
+                    <input type="number" id="s-low" step="0.1" value="2.0">
+                </div>
+                <div class="form-group">
+                    <label>Alert Phone Numbers</label>
+                    <div id="sync-phones" class="sync-badge">Init</div>
+                    <input type="text" id="s-phones" placeholder="+23481...">
+                </div>
+                <div class="form-group">
+                    <label>SMS Alert Interval (min)</label>
+                    <div id="sync-smsmin" class="sync-badge">Init</div>
+                    <input type="number" id="s-smsmin" min="1" value="5">
+                </div>
+
+                <div class="toggle-group">
+                    <label>Device Buzzer</label>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div id="sync-snd" class="sync-badge" style="position:static;">Init</div>
+                        <input type="checkbox" id="s-snd">
+                    </div>
+                </div>
+                <div class="toggle-group">
+                    <label>Phone Calls on Alarm</label>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div id="sync-call" class="sync-badge" style="position:static;">Init</div>
+                        <input type="checkbox" id="s-call">
+                    </div>
+                </div>
+
+
+                <button class="btn-action" id="btn-save"
+                    style="background: var(--accent); color: white; border: none; margin-top: 24px; padding: 18px;"
+                    onclick="App.saveSets()">
+                    Apply Remote Configuration
+                </button>
+                <div
+                    style="margin-top: 20px; padding: 16px; border-radius: 12px; background: rgba(255,165,0,0.05); border: 1px solid rgba(255,165,0,0.1);">
+                    <p style="font-size: 12px; color: #f59e0b; margin: 0; line-height: 1.5;">
+                        <b>Note:</b> Changes are pushed to cloud instantly. The device syncs these changes every 10-30
+                        seconds depending on network stability.
+                    </p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="toast" class="toast">Settings Saved</div>
+
+    <script>
+        const App = {
+            config: {
+                fbUrl: 'https://bloodbankmonitor-35b6f-default-rtdb.firebaseio.com',
+                authToken: 'DQKc3kMTUy0e4Z6pKjAxEFpdUVqZWtySqJQCXXpT', // Hardcoded per request
+                pullInterval: 5000,
+                lockoutPostSave: 35000,
+                lockoutIdle: 10000
+            },
+            state: {
+                isEditing: false,
+                editTimer: null,
+                deviceData: null,
+                desiredSettings: null
+            },
+            init() {
+                this.setupInteractions();
+                this.startSync();
+                this.show('dash');
+            },
+            // Helper to sign URLs
+            url(path) {
+                return `${this.config.fbUrl}/${path}?auth=${this.config.authToken}`;
+            },
+            show(pageId) {
+                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+                const page = document.getElementById(pageId);
+                if (page) page.classList.add('active');
+                const btn = document.querySelector(`[data-page="${pageId}"]`);
+                if (btn) btn.classList.add('active');
+            },
+            toast(msg) {
+                const t = document.getElementById('toast');
+                t.textContent = msg;
+                t.classList.add('show');
+                setTimeout(() => t.classList.remove('show'), 4000);
+            },
+            startEditing() {
+                this.state.isEditing = true;
+                if (this.state.editTimer) clearTimeout(this.state.editTimer);
+            },
+            stopEditing(delay = this.config.lockoutIdle) {
+                if (this.state.editTimer) clearTimeout(this.state.editTimer);
+                this.state.editTimer = setTimeout(() => {
+                    this.state.isEditing = false;
+                    this.state.editTimer = null;
+                }, delay);
+            },
+            setupInteractions() {
+                document.querySelectorAll('input').forEach(i => {
+                    const track = () => this.startEditing();
+                    const untrack = () => this.stopEditing();
+
+                    i.onfocus = track;
+                    i.onblur = untrack;
+                    i.oninput = track;
+                    i.onmousedown = track;
+                    i.onkeydown = track;
+                    if (i.type === 'checkbox') {
+                        i.onclick = () => { track(); untrack(); };
+                    }
+                });
+            },
+            async startSync() {
+                await this.pull();
+                setInterval(() => this.pull(), this.config.pullInterval);
+            },
+            async pull() {
+                try {
+                    const [dRes, sRes] = await Promise.all([
+                        fetch(this.url('device.json')),
+                        fetch(this.url('settings.json'))
+                    ]);
+                    // Check for 401 here too to warn user
+                    if (dRes.status === 401 || sRes.status === 401) {
+                        console.warn("Auth required");
+                        // Optional: could toast here, but might be annoying on interval
+                    }
+
+                    const dev = await dRes.json();
+                    let des = await sRes.json();
+
+                    if (dev) {
+                        this.state.deviceData = dev;
+                        // Fallback: If remote settings don't exist yet, assume they match device
+                        if (!des) {
+                            des = {
+                                low: dev.low,
+                                high: dev.high,
+                                phones: dev.phones,
+                                smsmin: dev.smsmin,
+                                sound: dev.sound,
+                                call: dev.call
+                            };
+                        }
+                        this.state.desiredSettings = des;
+                        this.updateUI(dev, des);
+                    }
+                } catch (e) {
+                    console.error("Sync Error", e);
+                }
+            },
+            updateUI(dev, des) {
+                const $ = s => document.querySelector(s);
+                // Safe defaults if any data is missing
+                const safeLow = dev.low !== undefined ? dev.low : 0;
+                const safeHigh = dev.high !== undefined ? dev.high : 0;
+                const safeMin = dev.min !== undefined ? dev.min : 0;
+                const safeMax = dev.max !== undefined ? dev.max : 0;
+
+                $('#t-val').innerHTML = (dev.temp !== undefined ? dev.temp.toFixed(1) : '--.-') + '<span>&deg;C</span>';
+                $('#rng-val').textContent = `${safeLow.toFixed(1)} – ${safeHigh.toFixed(1)} °C`;
+                $('#mm-val').textContent = `${safeMin.toFixed(1)} / ${safeMax.toFixed(1)} °C`;
+
+                const now = Math.floor(Date.now() / 1000);
+                const ago = now - (dev.lastUpdate || 0);
+                const syncEl = $('#sync-val');
+                if (ago < 120) {
+                    syncEl.innerHTML = '<div class="logo-dot" style="animation:none; width:8px; height:8px; box-shadow:none;"></div> Live Hardware';
+                    syncEl.style.color = 'var(--ok)';
+                    $('#led').style.background = 'var(--ok)';
+                    $('#led').style.boxShadow = '0 0 15px var(--ok)';
+                } else {
+                    syncEl.textContent = `Offline (${Math.floor(ago / 60)}m ago)`;
+                    syncEl.style.color = 'var(--bad)';
+                    $('#led').style.background = 'var(--bad)';
+                    $('#led').style.boxShadow = '0 0 15px var(--bad)';
+                }
+
+                if (dev.alarm) {
+                    $('#st-chip').textContent = '⚠️ Critical Alarm';
+                    $('#st-chip').className = 'status-chip critical';
+                } else {
+                    $('#st-chip').textContent = '✨ System Secure';
+                    $('#st-chip').className = 'status-chip';
+                }
+                if (dev.lastSms) $('#gsm-val').textContent = 'Last SMS: ' + dev.lastSms;
+
+                if (des) {
+                    this.updateSyncBadge('high', dev.high, des.high);
+                    this.updateSyncBadge('low', dev.low, des.low);
+                    this.updateSyncBadge('phones', dev.phones, des.phones);
+                    this.updateSyncBadge('smsmin', dev.smsmin, des.smsmin);
+                    this.updateSyncBadge('snd', dev.sound, des.sound);
+                    this.updateSyncBadge('call', dev.call, des.call);
+
+                    if (!this.state.isEditing) {
+                        $('#s-high').value = des.high;
+                        $('#s-low').value = des.low;
+                        $('#s-phones').value = des.phones || "";
+                        $('#s-smsmin').value = des.smsmin || 5;
+                        $('#s-snd').checked = des.sound === 1;
+                        $('#s-call').checked = des.call === 1;
+                    }
+                }
+                this.renderChart();
+            },
+            updateSyncBadge(id, current, desired) {
+                const el = document.getElementById(`sync-${id}`);
+                if (!el) return;
+                const isSynced = (current == desired);
+                el.textContent = isSynced ? "Applied" : "Syncing...";
+                el.className = `sync-badge ${isSynced ? 'applied' : 'pending'}`;
+            },
+            async cmd(s) {
+                try {
+                    const r = await fetch(this.url('settings.json'), {
+                        method: 'PATCH',
+                        body: JSON.stringify({ sound: s })
+                    });
+                    if (r.ok) this.toast(s ? 'Alarm Unmuted' : 'Alarm Muted');
+                } catch (e) { this.toast('Cmd Failed'); }
+            },
+            async saveSets() {
+                const btn = document.getElementById('btn-save');
+                try {
+                    btn.textContent = 'Pushing to Cloud...';
+                    btn.disabled = true;
+
+                    // Collect data with safety checks
+                    const getVal = (id) => {
+                        const el = document.getElementById(id);
+                        return el ? el.value : '';
+                    };
+                    const getChk = (id) => {
+                        const el = document.getElementById(id);
+                        return el ? el.checked : false;
+                    };
+
+                    const data = {
+                        low: parseFloat(getVal('s-low')) || 0,
+                        high: parseFloat(getVal('s-high')) || 0,
+                        sound: getChk('s-snd') ? 1 : 0,
+                        call: getChk('s-call') ? 1 : 0,
+                        phones: getVal('s-phones').trim(),
+                        smsmin: parseInt(getVal('s-smsmin')) || 5
+                    };
+
+                    console.log("Pushing Data:", data);
+
+                    const r = await fetch(this.url('settings.json'), {
+                        method: 'PATCH',
+                        body: JSON.stringify(data)
+                    });
+
+                    if (r.ok) {
+                        this.toast('Configuration Pushed!');
+                        this.startEditing();
+                        this.stopEditing(this.config.lockoutPostSave);
+                    } else {
+                        throw new Error(`HTTP ${r.status}`);
+                    }
+                } catch (e) {
+                    console.error("Save Error:", e);
+                    this.toast('Save Failed: ' + e.message);
+                } finally {
+                    btn.textContent = 'Apply Remote Configuration';
+                    btn.disabled = false;
+                }
+            },
+            async renderChart() {
+                try {
+                    const r = await fetch(`${this.config.fbUrl}/history.json?limitToLast=24`);
+                    const jh = await r.json();
+                    if (!jh) return;
+                    const pts = Object.keys(jh).map(k => ({ ts: parseInt(k), t: jh[k].t }));
+                    const c = document.getElementById('bars'), x = c.getContext('2d');
+                    if (!c) return;
+                    const W = c.clientWidth, H = c.clientHeight;
+                    const DPR = window.devicePixelRatio || 1;
+                    c.width = W * DPR; c.height = H * DPR; x.scale(DPR, DPR); x.clearRect(0, 0, W, H);
+                    const L = 40, R = 10, T = 10, B = 25, w = W - L - R, h = H - T - B;
+                    const vals = pts.map(p => p.t);
+                    let lo = Math.floor(Math.min(...vals, 1.0) - 1), hi = Math.ceil(Math.max(...vals, 7.0) + 1);
+                    const X = i => L + i * (w / (pts.length - 1)), Y = v => T + (1 - (v - lo) / (hi - lo)) * h;
+                    x.strokeStyle = 'rgba(255,255,255,0.03)';
+                    for (let i = 0; i <= 4; i++) {
+                        const gy = T + i * h / 4; x.beginPath(); x.moveTo(L, gy); x.lineTo(W - R, gy); x.stroke();
+                        const val = hi - i * (hi - lo) / 4;
+                        x.fillStyle = 'rgba(148, 163, 184, 0.5)'; x.font = '10px Inter';
+                        x.fillText(val.toFixed(0), 10, gy + 4);
+                    }
+                    const grad = x.createLinearGradient(0, 0, 0, H);
+                    grad.addColorStop(0, 'rgba(59, 130, 246, 0.2)'); grad.addColorStop(1, 'rgba(59, 130, 246, 0)');
+                    x.fillStyle = grad; x.beginPath(); x.moveTo(X(0), H - B);
+                    for (let i = 0; i < pts.length; i++) x.lineTo(X(i), Y(pts[i].t));
+                    x.lineTo(X(pts.length - 1), H - B); x.closePath(); x.fill();
+                    x.strokeStyle = '#3b82f6'; x.lineWidth = 3; x.lineJoin = 'round';
+                    x.beginPath(); x.moveTo(X(0), Y(pts[0].t));
+                    for (let i = 1; i < pts.length; i++) x.lineTo(X(i), Y(pts[i].t));
+                    x.stroke();
+                } catch (e) { }
+            }
+        };
+        window.onload = () => App.init();
+    </script>
+</body>
+
+</html>

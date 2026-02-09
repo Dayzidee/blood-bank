@@ -1,0 +1,270 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta name=viewport content='width=device-width,initial-scale=1'>
+  <title>Settings - Blood Bank Monitor</title>
+  <style>
+    :root {
+      --bg: #0b0f1a;
+      --card: #151b2d;
+      --border: rgba(255, 255, 255, 0.08);
+      --accent: #3b82f6;
+      --text: #e2e8f0;
+      --sub: #94a3b8
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px system-ui, -apple-system;
+      overflow-x: hidden
+    }
+
+    .wrap {
+      max-width: 700px;
+      margin: 24px auto;
+      padding: 0 20px
+    }
+
+    h2 {
+      font-size: 24px;
+      margin-bottom: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px
+    }
+
+    h3 {
+      font-size: 16px;
+      margin: 0 0 16px;
+      color: var(--sub);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 600
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+      position: relative;
+      overflow: hidden
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0.3
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--sub);
+      font-size: 13px;
+      font-weight: 500
+    }
+
+    input,
+    button,
+    select {
+      font-size: 15px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--text);
+      width: 100%;
+      box-sizing: border-box;
+      transition: all 0.2s
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15)
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px
+    }
+
+    @media(max-width:500px) {
+      .row {
+        grid-template-columns: 1fr
+      }
+    }
+
+    .btn-nav {
+      display: inline-flex;
+      align-items: center;
+      padding: 10px 18px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      margin-right: 10px;
+      border: 1px solid var(--border);
+      transition: 0.2s
+    }
+
+    .btn-nav:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--sub)
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 10px
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      transform: translateY(-1px)
+    }
+
+    .btn-danger {
+      background: #7f1d1d;
+      color: #fecaca;
+      border-color: #991b1b;
+      cursor: pointer
+    }
+
+    .btn-danger:hover {
+      background: #991b1b
+    }
+
+    .cb-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 12px 0;
+      cursor: pointer
+    }
+
+    .cb-row input {
+      width: auto;
+      margin: 0
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 32px;
+      transform: translateX(-50%) translateY(20px);
+      background: #1e293b;
+      border: 1px solid var(--border);
+      padding: 12px 24px;
+      border-radius: 16px;
+      opacity: 0;
+      transition: 0.3s;
+      font-size: 14px;
+      font-weight: 600;
+      pointer-events: none;
+      z-index: 1000
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0)
+    }
+  </style>
+</head>
+
+<body>
+  <div class='wrap'>
+    <div style='margin-bottom:32px'><a class='btn-nav' href='local_dashboard.html'>Dashboard</a> <a class='btn-nav'
+        href='#'>History</a></div>
+    <h2>System Configuration</h2>
+
+    <div class='card'>
+      <h3>Network (Internet)</h3>
+      <label>Wi-Fi Name (SSID)</label><input id='wss' placeholder='Hotspot or Router Name'>
+      <label style='margin-top:16px'>Wi-Fi Password</label><input id='wqs' type='password' placeholder='Enter password'>
+      <small style='display:block;margin-top:12px;color:#64748b;font-size:11px'>Cloud is automatically configured to
+        <b>bloodbankmonitor-35b6f</b></small>
+    </div>
+
+    <div class='card'>
+      <h3>Monitoring Setpoints</h3>
+      <div class='row'>
+        <div><label>Low Limit (&deg;C)</label><input id='low' type='number' step='0.1'></div>
+        <div><label>High Limit (&deg;C)</label><input id='high' type='number' step='0.1'></div>
+      </div>
+    </div>
+
+    <div class='card'>
+      <h3>Notifications</h3>
+      <label>Phone Numbers (comma separated)</label><input id='phones' placeholder='+234...'>
+      <div class='row' style='margin-top:16px'>
+        <div><label>SMS Interval (min)</label><input id='smsmin' type='number' min='1'></div>
+      </div>
+      <label class='cb-row'><input id='devsnd' type='checkbox'> Device Sound (Buzzer)</label>
+      <label class='cb-row'><input id='call' type='checkbox'> Enable Calls on Alarm</label>
+      <div style='margin-top:16px'><button id='save' class='btn-primary'>Apply & Save Changes</button></div>
+    </div>
+
+    <div class='card'>
+      <h3>System Maintenance</h3>
+      <div class='row'>
+        <button id='resetmm'>Reset Min/Max</button>
+        <button id='test'>Test SMS</button>
+      </div>
+      <div class='row' style='margin-top:12px'>
+        <button id='clearlog'>Clear Data Log</button>
+        <button id='factory' class='btn-danger'>Factory Reset</button>
+      </div>
+    </div>
+    <div id='toast' class='toast'>Saved</div>
+  </div>
+  <script>
+    const $ = s => document.querySelector(s);
+    function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+    let isEditing = false;
+    document.querySelectorAll('input').forEach(i => {
+      i.onfocus = () => { isEditing = true; };
+      i.onblur = () => { setTimeout(() => isEditing = false, 3000); };
+    });
+
+    // standalone test data
+    const c = { low: 2.0, high: 6.0, wss: 'MyNetwork', phones: '+234...', sound: true, smsmin: 5 };
+    $('#low').value = c.low; $('#high').value = c.high; $('#wss').value = c.wss; $('#phones').value = c.phones; $('#devsnd').checked = c.sound; $('#smsmin').value = c.smsmin;
+
+    $('#save').onclick = async () => {
+      if (window.location.hostname !== '192.168.4.1' && window.location.hostname !== 'localhost') {
+        const data = {
+          low: parseFloat($('#low').value),
+          high: parseFloat($('#high').value),
+          sound: $('#devsnd').checked ? 1 : 0,
+          call: $('#call').checked ? 1 : 0,
+          phones: $('#phones').value,
+          smsmin: parseInt($('#smsmin').value)
+        };
+        const r = await fetch(fbUrl + '/settings.json', { method: 'PATCH', body: JSON.stringify(data) });
+        if (r.ok) toast('Cloud Settings Applied');
+        return;
+      }
+      toast('Changes Applied (Test Mode)'); // Fallback for local/test environment
+    };
+  </script>
+</body>
+
+</html>

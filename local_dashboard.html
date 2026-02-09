@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>
+<title>Command Center - Blood Bank Monitor</title><style>
+:root{--bg:#020617;--card:#0f172a;--border:rgba(255,255,255,0.06);--accent:#3b82f6;--text:#f8fafc;--sub:#94a3b8;--ok:#10b981;--bad:#ef4444}
+body{margin:0;background:var(--bg);color:var(--text);font:16px system-ui,-apple-system;overflow-x:hidden}
+.wrap{max-width:900px;margin:auto;padding:24px}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px}
+h1{font-size:24px;font-weight:800;letter-spacing:-1px;margin:0;background:linear-gradient(90deg,#fff,#94a3b8);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.card{background:var(--card);border:1px solid var(--border);border-radius:24px;padding:32px;box-shadow:0 20px 50px rgba(0,0,0,0.5);position:relative;overflow:hidden}
+.card::after{content:'';position:absolute;top:0;right:0;width:150px;height:150px;background:var(--accent);filter:blur(100px);opacity:0.1;pointer-events:none}
+.big-t{font-size:96px;font-weight:900;text-align:center;margin:20px 0;letter-spacing:-4px;line-height:1;position:relative}
+.big-t span{font-size:32px;font-weight:500;color:var(--sub);vertical-align:top;margin-left:4px}
+.status-chip{padding:8px 16px;border-radius:999px;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;border:1px solid transparent}
+.status-ok{background:rgba(16,185,129,0.1);color:var(--ok);border-color:rgba(16,185,129,0.2)}
+.status-bad{background:rgba(239,68,68,0.1);color:var(--bad);border-color:rgba(239,68,68,0.2);animation:pulse 2s infinite}
+@keyframes pulse{0%{opacity:1}50%{opacity:0.6}100%{opacity:1}}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:24px;margin-top:32px}
+.sub-card{background:rgba(255,255,255,0.03);border:1px solid var(--border);padding:16px;border-radius:18px}
+.label{color:var(--sub);font-size:12px;text-transform:uppercase;font-weight:600;margin-bottom:6px;letter-spacing:0.5px}
+.val{font-size:18px;font-weight:600}
+.nav-bar{display:flex;gap:12px;margin-top:24px;border-top:1px solid var(--border);padding-top:24px}
+.btn{background:rgba(255,255,255,0.05);border:1px solid var(--border);padding:12px 20px;border-radius:14px;color:var(--text);font-size:14px;font-weight:600;text-decoration:none;transition:0.2s;cursor:pointer;flex:1;text-align:center}
+.btn:hover{background:var(--accent);color:white;border-color:var(--accent)}
+.btn-red:hover{background:var(--bad);border-color:var(--bad)}
+.chart-con{margin-top:24px;background:var(--card);border:1px solid var(--border);border-radius:24px;padding:20px;height:220px}
+.toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:#1e293b;border:1px solid var(--border);padding:12px 24px;border-radius:16px;opacity:0;transition:0.3s;font-size:14px;font-weight:600;pointer-events:none;z-index:1000}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style></head><body>
+<div class='wrap'>
+<header><h1>Blood Bank <span style='font-weight:300'>Live</span></h1><div id='st' class='status-chip status-ok'>System Secure</div></header>
+<div class='card'>
+<div class='label' style='text-align:center'>Current Temperature</div>
+<div class='big-t' id='t'>4.2<span>&deg;C</span></div>
+<div class='grid'>
+<div class='sub-card'><div class='label'>Safe Range</div><div class='val' id='rng'>2.0 &ndash; 6.0 &deg;C</div></div>
+<div class='sub-card'><div class='label'>Min / Max (24h)</div><div class='val' id='mm'>1.8 / 5.2 &deg;C</div></div>
+<div class='sub-card'><div class='label'>Last Report</div><div class='val' id='ts'>Just now</div></div>
+</div>
+</div>
+<div class='grid'>
+<div class='sub-card'>
+<div class='label'>Alert Control</div>
+<div style='display:flex;gap:8px;margin-top:8px'>
+<button id='on' class='btn btn-red'>Mute Off</button>
+<button id='off' class='btn'>Mute Buzzer</button>
+</div>
+</div>
+<div class='sub-card'><div class='label'>Cloud Sync</div><div class='val' id='cloud-st'>Connected</div></div>
+<div class='sub-card'><div class='label'>GSM Link</div><div class='val' id='gsm-st'>Standby</div></div>
+</div>
+<div class='chart-con'><canvas id='bars'></canvas></div>
+<div class='nav-bar'>
+<a href='local_settings.html' class='btn'>System Settings</a>
+<a href='#' class='btn'>View History</a>
+</div>
+<div id='toast' class='toast'></div>
+</div>
+<script>
+// Mock script for preview
+</script></body></html>
