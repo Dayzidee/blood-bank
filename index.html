@@ -11,17 +11,17 @@
         rel="stylesheet">
     <style>
         :root {
-            --bg: #030712;
-            --card: rgba(15, 23, 42, 0.6);
-            --border: rgba(255, 255, 255, 0.08);
-            --accent: hsl(217, 91%, 60%);
-            --accent-glow: hsla(217, 91%, 60%, 0.4);
-            --text: #f8fafc;
-            --sub: #94a3b8;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --accent: #2563eb;
+            --accent-glow: rgba(37, 99, 235, 0.15);
+            --text: #0f172a;
+            --sub: #64748b;
             --ok: #10b981;
             --bad: #ef4444;
-            --glass: rgba(15, 23, 42, 0.85);
-            --panel: rgba(30, 41, 59, 0.4);
+            --glass: rgba(255, 255, 255, 0.9);
+            --panel: #f1f5f9;
         }
 
         * {
@@ -31,7 +31,7 @@
 
         body {
             margin: 0;
-            background: radial-gradient(circle at top right, #0f172a, #020617);
+            background: radial-gradient(circle at top right, #f1f5f9, #e2e8f0);
             color: var(--text);
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
             overflow-x: hidden;
@@ -127,7 +127,7 @@
         }
 
         .nav-btn:hover:not(.active) {
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(0, 0, 0, 0.05);
             color: var(--text);
         }
 
@@ -162,7 +162,7 @@
             text-align: center;
             position: relative;
             overflow: hidden;
-            box-shadow: 0 40px 100px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.05);
             margin-bottom: 40px;
         }
 
@@ -211,11 +211,11 @@
             letter-spacing: -8px;
             line-height: 0.8;
             margin: 0;
-            background: linear-gradient(180deg, #fff 30%, var(--sub) 100%);
+            background: linear-gradient(180deg, var(--text) 30%, var(--sub) 100%);
             -webkit-background-clip: text;
             background-clip: text;
             -webkit-text-fill-color: transparent;
-            filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
+            filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.05));
         }
 
         .temp-main span {
@@ -247,7 +247,7 @@
         .stat-box:hover {
             border-color: var(--accent);
             transform: translateY(-5px);
-            background: rgba(30, 41, 59, 0.6);
+            background: var(--card);
         }
 
         .stat-label {
@@ -262,7 +262,7 @@
         .stat-val {
             font-size: 24px;
             font-weight: 700;
-            color: white;
+            color: var(--text);
         }
 
         /* Controls */
@@ -342,7 +342,7 @@
         input {
             width: 100%;
             padding: 18px;
-            background: rgba(0, 0, 0, 0.3);
+            background: #ffffff;
             border: 1px solid var(--border);
             border-radius: 16px;
             color: var(--text);
@@ -354,7 +354,7 @@
             outline: none;
             border-color: var(--accent);
             box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
-            background: rgba(0, 0, 0, 0.5);
+            background: #ffffff;
         }
 
         /* Checkbox styling */
@@ -363,7 +363,7 @@
             align-items: center;
             justify-content: space-between;
             padding: 16px 20px;
-            background: rgba(0, 0, 0, 0.2);
+            background: var(--panel);
             border-radius: 16px;
             margin-bottom: 12px;
             border: 1px solid var(--border);
@@ -377,7 +377,7 @@
             width: 48px;
             height: 24px;
             appearance: none;
-            background: rgba(255, 255, 255, 0.1);
+            background: #cbd5e1;
             border-radius: 20px;
             position: relative;
             cursor: pointer;
@@ -434,6 +434,41 @@
             margin-top: 40px;
         }
 
+        /* Snapshot Table Styling */
+        .snapshot-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        .snapshot-table th, .snapshot-table td {
+            padding: 16px;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .snapshot-table th {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--sub);
+            font-weight: 800;
+            letter-spacing: 1px;
+        }
+
+        .snapshot-table td {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .snapshot-time {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--sub);
+            display: block;
+            margin-top: 4px;
+        }
+
         @media (max-width: 600px) {
             .temp-main {
                 font-size: 80px;
@@ -461,6 +496,11 @@
 
         <!-- DASHBOARD PAGE -->
         <main id="dash" class="page active">
+            <div class="hero-card" style="padding: 24px; margin-bottom: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: auto;">
+                <div class="stat-label" style="margin-bottom: 8px;">Current Time</div>
+                <div class="stat-val" id="live-clock" style="font-size: 32px; font-weight: 800; letter-spacing: -1px;">--/--/----, --:--:-- --</div>
+            </div>
+
             <div class="hero-card">
                 <div id="st-chip" class="status-chip">System Secure</div>
                 <div class="temp-main" id="t-val">--.-<span>&deg;C</span></div>
@@ -498,11 +538,55 @@
 
             <div class="chart-con">
                 <div class="stat-label" style="display:flex; justify-content:space-between;">
+                    <span>Daily Temperature Snapshots</span>
+                    <span style="opacity: 0.5;">Plan B: Last 24h</span>
+                </div>
+                <table class="snapshot-table">
+                    <thead>
+                        <tr>
+                            <th>Morning<span class="snapshot-time">06:00</span></th>
+                            <th>Afternoon<span class="snapshot-time">12:00</span></th>
+                            <th>Evening<span class="snapshot-time">18:00</span></th>
+                            <th>Night<span class="snapshot-time">00:00</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td id="snap-morning">--.-°C</td>
+                            <td id="snap-afternoon">--.-°C</td>
+                            <td id="snap-evening">--.-°C</td>
+                            <td id="snap-night">--.-°C</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="chart-con">
+                <div class="stat-label" style="display:flex; justify-content:space-between;">
                     <span>Temperature History</span>
                     <span style="opacity: 0.5;">Last 24 Data Points</span>
                 </div>
                 <canvas id="bars" style="margin-top:20px;"></canvas>
             </div>
+
+            <footer style="margin-top: 80px; padding: 40px 0; border-top: 1px solid var(--border); text-align: center; color: var(--sub); font-size: 14px; line-height: 1.8;">
+                <p style="font-weight: 800; color: var(--text); letter-spacing: 1px; margin-bottom: 24px;">SESSION : 2025/2026 - M.23/HND/I&C</p>
+
+                <div style="margin-bottom: 24px;">
+                    <p style="font-weight: 700; color: var(--text); margin: 0;">ENGR. Dr. ABDULAZEEZ D. EL-LADAN</p>
+                    <p style="margin: 0;">Project Supervisor</p>
+                </div>
+
+                <div style="margin-bottom: 24px;">
+                    <p style="font-weight: 700; color: var(--text); margin: 0;">ENGR. (Dr.) ABDULHAMID MUSA</p>
+                    <p style="margin: 0;">Head of Department</p>
+                </div>
+
+                <div style="margin-top: 32px; padding-top: 24px; border-top: 1px dashed var(--border);">
+                    <p style="font-weight: 700; color: var(--text); margin: 0;">OKAFOR CHINASOM MATTHEW, OGHARSI DAVID</p>
+                    <p style="margin: 0;">Project students</p>
+                </div>
+            </footer>
         </main>
 
         <!-- SETTINGS PAGE -->
@@ -585,7 +669,21 @@
             init() {
                 this.setupInteractions();
                 this.startSync();
+                this.startClock();
                 this.show('dash');
+            },
+            startClock() {
+                const update = () => {
+                    const now = new Date();
+                    const options = {
+                        year: 'numeric', month: 'numeric', day: 'numeric',
+                        hour: 'numeric', minute: 'numeric', second: 'numeric',
+                        hour12: true
+                    };
+                    document.getElementById('live-clock').textContent = now.toLocaleString('en-US', options);
+                };
+                update();
+                setInterval(update, 1000);
             },
             // Helper to sign URLs
             url(path) {
@@ -724,6 +822,41 @@
                     }
                 }
                 this.renderChart();
+                this.updateSnapshots();
+            },
+            async updateSnapshots() {
+                try {
+                    const r = await fetch(this.url('history.json') + '&limitToLast=1000');
+                    const jh = await r.json();
+                    if (!jh) return;
+                    const pts = Object.keys(jh).map(k => ({ ts: parseInt(k), t: jh[k].t }));
+
+                    const findClosest = (targetHour) => {
+                        const now = new Date();
+                        const target = new Date();
+                        target.setHours(targetHour, 0, 0, 0);
+                        if (target > now) target.setDate(target.getDate() - 1);
+
+                        const targetTs = Math.floor(target.getTime() / 1000);
+                        let closest = pts[0];
+                        let minDiff = Math.abs(pts[0].ts - targetTs);
+
+                        pts.forEach(p => {
+                            const diff = Math.abs(p.ts - targetTs);
+                            if (diff < minDiff) {
+                                minDiff = diff;
+                                closest = p;
+                            }
+                        });
+                        // Only return if it's within 2 hours of the target
+                        return minDiff < 7200 ? closest.t.toFixed(1) + "°C" : "--.-°C";
+                    };
+
+                    document.getElementById('snap-morning').textContent = findClosest(6);
+                    document.getElementById('snap-afternoon').textContent = findClosest(12);
+                    document.getElementById('snap-evening').textContent = findClosest(18);
+                    document.getElementById('snap-night').textContent = findClosest(0);
+                } catch (e) { console.error("Snapshot Error", e); }
             },
             updateSyncBadge(id, current, desired) {
                 const el = document.getElementById(`sync-${id}`);
@@ -790,7 +923,7 @@
             },
             async renderChart() {
                 try {
-                    const r = await fetch(`${this.config.fbUrl}/history.json?limitToLast=24`);
+                    const r = await fetch(this.url('history.json') + '&limitToLast=24');
                     const jh = await r.json();
                     if (!jh) return;
                     const pts = Object.keys(jh).map(k => ({ ts: parseInt(k), t: jh[k].t }));
@@ -803,11 +936,11 @@
                     const vals = pts.map(p => p.t);
                     let lo = Math.floor(Math.min(...vals, 1.0) - 1), hi = Math.ceil(Math.max(...vals, 7.0) + 1);
                     const X = i => L + i * (w / (pts.length - 1)), Y = v => T + (1 - (v - lo) / (hi - lo)) * h;
-                    x.strokeStyle = 'rgba(255,255,255,0.03)';
+                    x.strokeStyle = 'rgba(0,0,0,0.05)';
                     for (let i = 0; i <= 4; i++) {
                         const gy = T + i * h / 4; x.beginPath(); x.moveTo(L, gy); x.lineTo(W - R, gy); x.stroke();
                         const val = hi - i * (hi - lo) / 4;
-                        x.fillStyle = 'rgba(148, 163, 184, 0.5)'; x.font = '10px Inter';
+                        x.fillStyle = 'rgba(100, 116, 139, 0.7)'; x.font = '10px Inter';
                         x.fillText(val.toFixed(0), 10, gy + 4);
                     }
                     const grad = x.createLinearGradient(0, 0, 0, H);

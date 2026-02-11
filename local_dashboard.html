@@ -1,11 +1,11 @@
 <!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>
 <title>Command Center - Blood Bank Monitor</title><style>
-:root{--bg:#020617;--card:#0f172a;--border:rgba(255,255,255,0.06);--accent:#3b82f6;--text:#f8fafc;--sub:#94a3b8;--ok:#10b981;--bad:#ef4444}
+:root{--bg:#f8fafc;--card:#ffffff;--border:#e2e8f0;--accent:#2563eb;--text:#0f172a;--sub:#64748b;--ok:#10b981;--bad:#ef4444}
 body{margin:0;background:var(--bg);color:var(--text);font:16px system-ui,-apple-system;overflow-x:hidden}
 .wrap{max-width:900px;margin:auto;padding:24px}
 header{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px}
-h1{font-size:24px;font-weight:800;letter-spacing:-1px;margin:0;background:linear-gradient(90deg,#fff,#94a3b8);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-.card{background:var(--card);border:1px solid var(--border);border-radius:24px;padding:32px;box-shadow:0 20px 50px rgba(0,0,0,0.5);position:relative;overflow:hidden}
+h1{font-size:24px;font-weight:800;letter-spacing:-1px;margin:0;background:linear-gradient(90deg,var(--text),var(--sub));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.card{background:var(--card);border:1px solid var(--border);border-radius:24px;padding:32px;box-shadow:0 20px 40px rgba(0,0,0,0.05);position:relative;overflow:hidden}
 .card::after{content:'';position:absolute;top:0;right:0;width:150px;height:150px;background:var(--accent);filter:blur(100px);opacity:0.1;pointer-events:none}
 .big-t{font-size:96px;font-weight:900;text-align:center;margin:20px 0;letter-spacing:-4px;line-height:1;position:relative}
 .big-t span{font-size:32px;font-weight:500;color:var(--sub);vertical-align:top;margin-left:4px}
@@ -14,19 +14,25 @@ h1{font-size:24px;font-weight:800;letter-spacing:-1px;margin:0;background:linear
 .status-bad{background:rgba(239,68,68,0.1);color:var(--bad);border-color:rgba(239,68,68,0.2);animation:pulse 2s infinite}
 @keyframes pulse{0%{opacity:1}50%{opacity:0.6}100%{opacity:1}}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:24px;margin-top:32px}
-.sub-card{background:rgba(255,255,255,0.03);border:1px solid var(--border);padding:16px;border-radius:18px}
+.sub-card{background:rgba(0,0,0,0.02);border:1px solid var(--border);padding:16px;border-radius:18px}
 .label{color:var(--sub);font-size:12px;text-transform:uppercase;font-weight:600;margin-bottom:6px;letter-spacing:0.5px}
 .val{font-size:18px;font-weight:600}
 .nav-bar{display:flex;gap:12px;margin-top:24px;border-top:1px solid var(--border);padding-top:24px}
-.btn{background:rgba(255,255,255,0.05);border:1px solid var(--border);padding:12px 20px;border-radius:14px;color:var(--text);font-size:14px;font-weight:600;text-decoration:none;transition:0.2s;cursor:pointer;flex:1;text-align:center}
+.btn{background:rgba(0,0,0,0.05);border:1px solid var(--border);padding:12px 20px;border-radius:14px;color:var(--text);font-size:14px;font-weight:600;text-decoration:none;transition:0.2s;cursor:pointer;flex:1;text-align:center}
 .btn:hover{background:var(--accent);color:white;border-color:var(--accent)}
 .btn-red:hover{background:var(--bad);border-color:var(--bad)}
 .chart-con{margin-top:24px;background:var(--card);border:1px solid var(--border);border-radius:24px;padding:20px;height:220px}
-.toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:#1e293b;border:1px solid var(--border);padding:12px 24px;border-radius:16px;opacity:0;transition:0.3s;font-size:14px;font-weight:600;pointer-events:none;z-index:1000}
+.toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:var(--accent);color:white;border:1px solid var(--border);padding:12px 24px;border-radius:16px;opacity:0;transition:0.3s;font-size:14px;font-weight:600;pointer-events:none;z-index:1000}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 </style></head><body>
 <div class='wrap'>
 <header><h1>Blood Bank <span style='font-weight:300'>Live</span></h1><div id='st' class='status-chip status-ok'>System Secure</div></header>
+
+<div class='card' style='margin-bottom:24px; text-align:center; padding:24px;'>
+<div class='label'>Current Time</div>
+<div id='live-clock' style='font-size:28px; font-weight:800; margin-top:8px;'>--/--/----, --:--:-- --</div>
+</div>
+
 <div class='card'>
 <div class='label' style='text-align:center'>Current Temperature</div>
 <div class='big-t' id='t'>4.2<span>&deg;C</span></div>
@@ -47,13 +53,85 @@ h1{font-size:24px;font-weight:800;letter-spacing:-1px;margin:0;background:linear
 <div class='sub-card'><div class='label'>Cloud Sync</div><div class='val' id='cloud-st'>Connected</div></div>
 <div class='sub-card'><div class='label'>GSM Link</div><div class='val' id='gsm-st'>Standby</div></div>
 </div>
+<div class='card' style='margin-top:24px; padding:24px;'>
+<div class='label' style='display:flex; justify-content:space-between;'>
+<span>Daily Temperature Snapshots</span>
+<span style='opacity: 0.5;'>Plan B</span>
+</div>
+<style>
+.snap-table{width:100%; border-collapse:collapse; margin-top:16px;}
+.snap-table th, .snap-table td{padding:12px; text-align:center; border-bottom:1px solid var(--border);}
+.snap-table th{font-size:10px; text-transform:uppercase; color:var(--sub);}
+.snap-table td{font-size:16px; font-weight:700;}
+.snap-time{font-size:10px; font-weight:400; color:var(--sub); display:block;}
+</style>
+<table class='snap-table'>
+<thead>
+<tr>
+<th>Morning<span class='snap-time'>06:00</span></th>
+<th>Afternoon<span class='snap-time'>12:00</span></th>
+<th>Evening<span class='snap-time'>18:00</span></th>
+<th>Night<span class='snap-time'>00:00</span></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td id='snap-morning'>--.-°C</td>
+<td id='snap-afternoon'>--.-°C</td>
+<td id='snap-evening'>--.-°C</td>
+<td id='snap-night'>--.-°C</td>
+</tr>
+</tbody>
+</table>
+</div>
+
 <div class='chart-con'><canvas id='bars'></canvas></div>
 <div class='nav-bar'>
 <a href='local_settings.html' class='btn'>System Settings</a>
 <a href='#' class='btn'>View History</a>
 </div>
+
+<footer style="margin-top: 60px; padding: 40px 0; border-top: 1px solid var(--border); text-align: center; color: var(--sub); font-size: 13px; line-height: 1.6;">
+    <p style="font-weight: 800; color: var(--text); letter-spacing: 0.5px; margin-bottom: 20px;">SESSION : 2025/2026 - M.23/HND/I&C</p>
+
+    <div style="margin-bottom: 20px;">
+        <p style="font-weight: 700; color: var(--text); margin: 0;">ENGR. Dr. ABDULAZEEZ D. EL-LADAN</p>
+        <p style="margin: 0;">Project Supervisor</p>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+        <p style="font-weight: 700; color: var(--text); margin: 0;">ENGR. (Dr.) ABDULHAMID MUSA</p>
+        <p style="margin: 0;">Head of Department</p>
+    </div>
+
+    <div style="margin-top: 24px; padding-top: 20px; border-top: 1px dashed var(--border);">
+        <p style="font-weight: 700; color: var(--text); margin: 0;">OKAFOR CHINASOM MATTHEW, OGHARSI DAVID</p>
+        <p style="margin: 0;">Project students</p>
+    </div>
+</footer>
+
 <div id='toast' class='toast'></div>
 </div>
 <script>
-// Mock script for preview
+const updateClock = () => {
+    const now = new Date();
+    const options = {
+        year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: 'numeric', second: 'numeric',
+        hour12: true
+    };
+    document.getElementById('live-clock').textContent = now.toLocaleString('en-US', options);
+};
+updateClock();
+setInterval(updateClock, 1000);
+
+// Mock data for snapshots since this might be local-only or need specific API
+// In a real scenario, this would fetch from the same source as the chart
+const mockSnapshots = () => {
+    document.getElementById('snap-morning').textContent = "4.1°C";
+    document.getElementById('snap-afternoon').textContent = "4.5°C";
+    document.getElementById('snap-evening').textContent = "3.9°C";
+    document.getElementById('snap-night').textContent = "4.0°C";
+};
+mockSnapshots();
 </script></body></html>
