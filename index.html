@@ -821,16 +821,21 @@
                         $('#s-call').checked = des.call === 1;
                     }
                 }
-                this.renderChart();
-                this.updateSnapshots();
+                this.updateHistory();
             },
-            async updateSnapshots() {
+            async updateHistory() {
                 try {
                     const r = await fetch(this.url('history.json') + '&limitToLast=1000');
                     const jh = await r.json();
                     if (!jh) return;
                     const pts = Object.keys(jh).map(k => ({ ts: parseInt(k), t: jh[k].t }));
 
+                    this.renderChart(pts.slice(-24));
+                    this.updateSnapshots(pts);
+                } catch (e) { console.error("History Update Error", e); }
+            },
+            updateSnapshots(pts) {
+                try {
                     const findClosest = (targetHour) => {
                         const now = new Date();
                         const target = new Date();
@@ -921,12 +926,8 @@
                     btn.disabled = false;
                 }
             },
-            async renderChart() {
+            renderChart(pts) {
                 try {
-                    const r = await fetch(this.url('history.json') + '&limitToLast=24');
-                    const jh = await r.json();
-                    if (!jh) return;
-                    const pts = Object.keys(jh).map(k => ({ ts: parseInt(k), t: jh[k].t }));
                     const c = document.getElementById('bars'), x = c.getContext('2d');
                     if (!c) return;
                     const W = c.clientWidth, H = c.clientHeight;
